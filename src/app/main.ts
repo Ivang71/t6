@@ -1,6 +1,7 @@
 // Bootstraps PixiJS renderer and wires audio engine
 import '../audio'
 import { Application, Container, Graphics, Rectangle, Sprite, Texture } from 'pixi.js'
+import { spawnMuzzleEffects } from 'src/app/effects'
 
 const canvas = document.getElementById('gameCanvas') as HTMLCanvasElement
 const fpsEl = document.getElementById('fps')!
@@ -50,6 +51,7 @@ let app: Application
 let world: Container
 let bulletsContainer: Container
 let tracksContainer: Container
+let effectsContainer: Container
 let playerContainer: Container
 let playerBody: Sprite
 let playerTurret: Sprite
@@ -79,6 +81,7 @@ async function init() {
   world = new Container()
   app.stage.addChild(world)
   app.stage.eventMode = 'static'
+  world.sortableChildren = true
 
   // Pre-bake textures once
   tankBodyTexture = makeTankBodyTexture()
@@ -91,12 +94,14 @@ async function init() {
   bulletsContainer = new Container()
   // Ensure tracks render underneath the tank
   world.addChild(tracksContainer)
+  tracksContainer.zIndex = 0
 
   // Player
   playerContainer = new Container()
   playerContainer.position.set(player.x, player.y)
   playerContainer.pivot.set(0, 0)
   world.addChild(playerContainer)
+  playerContainer.zIndex = 1
 
   playerBody = new Sprite(tankBodyTexture)
   playerBody.anchor.set(0.5)
@@ -108,6 +113,12 @@ async function init() {
 
   // Bullets above tank
   world.addChild(bulletsContainer)
+  bulletsContainer.zIndex = 2
+
+  // Effects overlay above bullets
+  effectsContainer = new Container()
+  world.addChild(effectsContainer)
+  effectsContainer.zIndex = 3
 
   // Input
   window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; (window as any).audioEngine?.start() })
@@ -155,8 +166,8 @@ function startTicker() {
 }
 
 function resize() {
-  viewportWidth = Math.min(Math.floor(window.innerWidth * 0.9), 1024)
-  viewportHeight = Math.floor(window.innerHeight * 0.7)
+  viewportWidth = Math.floor(window.innerWidth)
+  viewportHeight = Math.floor(window.innerHeight)
   app.renderer.resize(viewportWidth, viewportHeight)
   app.stage.hitArea = new Rectangle(0, 0, app.renderer.width, app.renderer.height)
 }
@@ -184,6 +195,15 @@ function handleShoot() {
     sprite.rotation = player.turretAngle
     bulletsContainer.addChild(sprite)
     bullets.push({ x: startX, y: startY, angle: player.turretAngle, speed: BULLET_SPEED, sprite })
+
+    // Fire visual effects at muzzle
+    spawnMuzzleEffects({
+      app,
+      container: effectsContainer,
+      position: { x: startX, y: startY },
+      angle: player.turretAngle,
+      drift: { x: player.vx, y: player.vy },
+    })
   }
 }
 

@@ -7,15 +7,18 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
-            background-color: #1a202c;
+            margin: 0;
+            background: #1a202c url('/assets/bg/grass.avif') center / cover no-repeat fixed;
             color: #e2e8f0;
             font-family: 'Inter', sans-serif;
             overflow: hidden; /* Prevent scrollbars from canvas */
         }
         canvas {
-            background-color: #2d3748;
+            width: 100vw; /* full width */
+            height: 100vh; /* full height */
             display: block;
             border: 2px solid #4a5568;
+            background: transparent;
         }
     </style>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -23,7 +26,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link rel="icon" href="https://cobalt.tools/favicon.png">
 </head>
-<body class="flex flex-col items-center justify-center min-h-screen p-4">
+<body class="flex flex-col items-center justify-center min-h-screen">
     <canvas id="gameCanvas"></canvas>
     <div id="fps" style="position:fixed;top:8px;right:12px;font-family:Roboto Mono, monospace;font-size:12px;color:#e2e8f0;background:rgba(17,24,39,0.6);padding:4px 6px;border-radius:4px;pointer-events:none;">0 FPS</div>
 
