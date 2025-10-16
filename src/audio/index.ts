@@ -31,6 +31,7 @@ let lastDriveVol = 0;
 let runEnv = 0;
 let idleEnv = 0;
 const shotUrls: string[] = tankShotUrls;
+const activeShots: { el: HTMLAudioElement; src: MediaElementAudioSourceNode; gain: GainNode }[] = [];
 
 function initGraph() {
   if (ctx) return;
@@ -93,15 +94,33 @@ function update(_dt: number, speedRatio: number, isAccelerating: boolean) {
 function shoot() {
   if (!ctx || !started) return;
   if (shotUrls.length === 0) return;
+  // Play a new shot with slight pitch variation
   const url = shotUrls[Math.floor(Math.random() * shotUrls.length)];
-  const one = new Audio(url);
-  one.preload = 'auto';
-  const src = ctx!.createMediaElementSource(one);
+  const el = new Audio(url);
+  el.preload = 'auto';
+  // Slight random pitch/tempo variation (±4%)
+  el.playbackRate = 0.96 + Math.random() * 0.08;
+  const src = ctx!.createMediaElementSource(el);
   const g = ctx!.createGain();
   g.gain.value = 1;
   src.connect(g).connect(master);
-  one.currentTime = 0;
-  one.play().then(()=>{ one.onended = ()=>{ g.disconnect(); src.disconnect(); }; }).catch(()=>{ g.disconnect(); src.disconnect(); });
+  activeShots.push({ el, src, gain: g });
+  el.currentTime = 0;
+  el.play()
+    .then(() => {
+      el.onended = () => {
+        const idx = activeShots.findIndex(s => s.el === el);
+        if (idx !== -1) activeShots.splice(idx, 1);
+        try { g.disconnect(); } catch {}
+        try { src.disconnect(); } catch {}
+      };
+    })
+    .catch(() => {
+      const idx = activeShots.findIndex(s => s.el === el);
+      if (idx !== -1) activeShots.splice(idx, 1);
+      try { g.disconnect(); } catch {}
+      try { src.disconnect(); } catch {}
+    });
 }
 
 (window as any).audioEngine = { start, update, shoot };

@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "license": "MIT",
   "scripts": {
-    "dev": "vite --open",
+    "dev": "vite",
     "start": "npm run dev",
     "build": "vite build",
     "preview": "vite preview --open --port 5173"
