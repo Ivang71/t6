@@ -69,7 +69,7 @@ async function init() {
   app = new Application()
   await app.init({
     view: canvas,
-    antialias: false,
+    antialias: true,
     autoDensity: true,
     resolution: Math.max(1, Math.min(window.devicePixelRatio || 1, 2)),
     powerPreference: 'high-performance',
@@ -311,8 +311,13 @@ function syncSprites() {
   playerContainer.position.set(player.x, player.y)
   playerContainer.rotation = player.angle
   // Keep turret world rotation absolute so muzzle points correctly during hull turns
-  playerTurret.rotation = player.turretAngle - player.angle
-  playerTurret.x = -player.turretRecoil
+  const turretRelative = player.turretAngle - player.angle
+  playerTurret.rotation = turretRelative
+  // Recoil along the barrel direction (in parent space)
+  playerTurret.position.set(
+    -Math.cos(turretRelative) * player.turretRecoil,
+    -Math.sin(turretRelative) * player.turretRecoil,
+  )
 }
 
 function acquireBulletSprite(): Sprite {

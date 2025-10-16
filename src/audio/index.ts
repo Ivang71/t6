@@ -75,7 +75,9 @@ function update(_dt: number, speedRatio: number, isAccelerating: boolean) {
   } else {
     const t = Math.max(0, Math.min(1, (s - 0.05) / 0.95))
     const smooth = t * t * (3 - 2 * t)
-    idleVol = 0.07 * (1 - smooth)
+    const idleBase = 0.07 * (1 - smooth)
+    const highSpeedAtten = s >= 0.9 ? 0.05 : s >= 0.75 ? 0.15 : 1
+    idleVol = idleBase * highSpeedAtten
     driveVol = (isAccelerating ? 0.16 : 0.14) * smooth
   }
   const decreasing = driveVol < lastDriveVol - 1e-4
