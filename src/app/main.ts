@@ -54,9 +54,11 @@ let tracksContainer: Container
 let effectsContainer: Container
 let playerContainer: Container
 let playerBody: Sprite
+let playerTurretBase: Sprite
 let playerTurret: Sprite
 
 let tankBodyTexture: Texture
+let turretBaseTexture: Texture
 let turretTexture: Texture
 let bulletTexture: Texture
 let trackTexture: Texture
@@ -85,6 +87,7 @@ async function init() {
 
   // Pre-bake textures once
   tankBodyTexture = makeTankBodyTexture()
+  turretBaseTexture = makeTurretBaseTexture()
   turretTexture = makeTurretTexture()
   bulletTexture = makeBulletTexture()
   trackTexture = makeTrackTexture()
@@ -110,6 +113,11 @@ async function init() {
   playerTurret = new Sprite(turretTexture)
   playerTurret.anchor.set(0, 0.5)
   playerContainer.addChild(playerTurret)
+
+  // Turret base sits on the hull and does not move with recoil; draw over muzzle
+  playerTurretBase = new Sprite(turretBaseTexture)
+  playerTurretBase.anchor.set(0.5)
+  playerContainer.addChild(playerTurretBase)
 
   // Bullets above tank
   world.addChild(bulletsContainer)
@@ -366,8 +374,7 @@ function makeTankBodyTexture(): Texture {
   const g = new Graphics()
   const tipX = TANK_LENGTH * 0.8
   const backX = -TANK_LENGTH / 2
-  g.beginFill(0x738093)
-  g.lineStyle(2, 0x000000, 0.5)
+  g.beginFill(0x8c8c8c)
   g.moveTo(tipX, 0)
   g.lineTo(TANK_LENGTH / 2, -TANK_WIDTH / 2)
   g.lineTo(backX, -TANK_WIDTH / 2)
@@ -382,8 +389,19 @@ function makeTankBodyTexture(): Texture {
 
 function makeTurretTexture(): Texture {
   const g = new Graphics()
-  g.beginFill(0x111827)
+  g.beginFill(0x000000)
   g.drawRect(0, -TURRET_WIDTH / 2, TURRET_LENGTH, TURRET_WIDTH)
+  g.endFill()
+  const texture = app.renderer.generateTexture(g)
+  g.destroy()
+  return texture
+}
+
+function makeTurretBaseTexture(): Texture {
+  const g = new Graphics()
+  const radius = TURRET_WIDTH * 1.6
+  g.beginFill(0x474747)
+  g.drawCircle(0, 0, radius)
   g.endFill()
   const texture = app.renderer.generateTexture(g)
   g.destroy()
