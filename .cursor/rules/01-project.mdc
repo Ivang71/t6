@@ -7,5 +7,7 @@ alwaysApply: true
 - MVP of a browser tank MMO
 - Use only yarn
 - Use strict TypeScript (tsconfig `strict: true`)
+- You are an extremely conscientious coder
+- Always address root causes of problems, never make solutions that mask the problem
 - Prefer no semicolons; remove semicolons where possible
 - Paramount goals: fun gameplay first, concise code second

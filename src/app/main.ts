@@ -1,8 +1,8 @@
-// Bootstraps canvas game loop and wires audio engine
+// Bootstraps PixiJS renderer and wires audio engine
 import '../audio'
+import { Application, Container, Graphics, Rectangle, Sprite, Texture } from 'pixi.js'
 
 const canvas = document.getElementById('gameCanvas') as HTMLCanvasElement
-const ctx = canvas.getContext('2d')!
 const fpsEl = document.getElementById('fps')!
 
 const TANK_LENGTH = 50
@@ -20,15 +20,14 @@ const TANK_TURN_ACCELERATION = 0.0012
 const TANK_TURN_DECELERATION = 0.93
 const TURRET_SMOOTHING = 0.1
 const BULLET_SPEED = 15
-const BULLET_SIZE = 5
 const FIRE_RATE = 1000
 const TANK_RECOIL = 0.05
 const TURRET_RECOIL_MAX = 8
 const TURRET_RECOIL_RECOVERY = 0.85
 const TRACK_LIFETIME = 10000
 
-type TrackMark = { x: number; y: number; angle: number; spawnTime: number }
-type Bullet = { x: number; y: number; angle: number; speed: number; size: number; color: string }
+type TrackMark = { sprite: Sprite; spawnTime: number }
+type Bullet = { x: number; y: number; angle: number; speed: number; sprite: Sprite }
 
 const keys: Record<string, boolean> = {}
 const mouse = { x: 0, y: 0 }
@@ -47,33 +46,126 @@ const player = {
   turretRecoil: 0,
 }
 
-function resizeCanvas() {
-  canvas.width = Math.min(window.innerWidth * 0.9, 1024)
-  canvas.height = window.innerHeight * 0.7
+let app: Application
+let world: Container
+let bulletsContainer: Container
+let tracksContainer: Container
+let playerContainer: Container
+let playerBody: Sprite
+let playerTurret: Sprite
+
+let tankBodyTexture: Texture
+let turretTexture: Texture
+let bulletTexture: Texture
+let trackTexture: Texture
+
+const bulletPool: Sprite[] = []
+const trackPool: Sprite[] = []
+
+let viewportWidth = 800
+let viewportHeight = 600
+
+async function init() {
+  app = new Application()
+  await app.init({
+    view: canvas,
+    antialias: false,
+    autoDensity: true,
+    resolution: Math.max(1, Math.min(window.devicePixelRatio || 1, 2)),
+    powerPreference: 'high-performance',
+    backgroundAlpha: 0,
+  })
+
+  world = new Container()
+  app.stage.addChild(world)
+  app.stage.eventMode = 'static'
+
+  // Pre-bake textures once
+  tankBodyTexture = makeTankBodyTexture()
+  turretTexture = makeTurretTexture()
+  bulletTexture = makeBulletTexture()
+  trackTexture = makeTrackTexture()
+
+  // Tracks and bullets containers; Pixi v8 batches sprites sharing textures automatically
+  tracksContainer = new Container()
+  bulletsContainer = new Container()
+  // Ensure tracks render underneath the tank
+  world.addChild(tracksContainer)
+
+  // Player
+  playerContainer = new Container()
+  playerContainer.position.set(player.x, player.y)
+  playerContainer.pivot.set(0, 0)
+  world.addChild(playerContainer)
+
+  playerBody = new Sprite(tankBodyTexture)
+  playerBody.anchor.set(0.5)
+  playerContainer.addChild(playerBody)
+
+  playerTurret = new Sprite(turretTexture)
+  playerTurret.anchor.set(0, 0.5)
+  playerContainer.addChild(playerTurret)
+
+  // Bullets above tank
+  world.addChild(bulletsContainer)
+
+  // Input
+  window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; (window as any).audioEngine?.start() })
+  window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false })
+  window.addEventListener('resize', resize)
+
+  canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect()
+    const scaleX = app.renderer.width / rect.width
+    const scaleY = app.renderer.height / rect.height
+    mouse.x = (e.clientX - rect.left) * scaleX
+    mouse.y = (e.clientY - rect.top) * scaleY
+  })
+  canvas.addEventListener('mousedown', e => {
+    if (e.button === 0) {
+      (window as any).audioEngine?.start()
+      handleShoot()
+    }
+  })
+
+  // Start
+  resize()
+  startTicker()
 }
 
-window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; (window as any).audioEngine?.start(); })
-window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; })
-window.addEventListener('resize', resizeCanvas)
+function startTicker() {
+  let fpsAccum = 0
+  let fpsFrames = 0
+  let fpsLastUpdate = 0
+  app.ticker.add(t => {
+    const deltaMs = t.deltaMS
+    update(deltaMs)
+    syncSprites()
+    fpsAccum += deltaMs
+    fpsFrames += 1
+    const now = app.ticker.lastTime
+    if (now - fpsLastUpdate > 250) {
+      const fps = fpsAccum > 0 ? Math.round((fpsFrames * 1000) / fpsAccum) : 0
+      fpsEl.textContent = `${fps} FPS`
+      fpsAccum = 0
+      fpsFrames = 0
+      fpsLastUpdate = now
+    }
+  })
+}
 
-canvas.addEventListener('mousemove', e => {
-  const rect = canvas.getBoundingClientRect()
-  mouse.x = e.clientX - rect.left
-  mouse.y = e.clientY - rect.top
-})
-
-canvas.addEventListener('mousedown', e => {
-  if (e.button === 0) {
-    (window as any).audioEngine?.start()
-    handleShoot()
-  }
-})
+function resize() {
+  viewportWidth = Math.min(Math.floor(window.innerWidth * 0.9), 1024)
+  viewportHeight = Math.floor(window.innerHeight * 0.7)
+  app.renderer.resize(viewportWidth, viewportHeight)
+  app.stage.hitArea = new Rectangle(0, 0, app.renderer.width, app.renderer.height)
+}
 
 function handleShoot() {
   const now = Date.now()
   if (now - lastShotTime > FIRE_RATE) {
-    lastShotTime = now;
-    (window as any).audioEngine?.shoot()
+    lastShotTime = now
+    ;(window as any).audioEngine?.shoot()
     const recoilForceX = Math.cos(player.turretAngle + Math.PI) * TANK_RECOIL
     const recoilForceY = Math.sin(player.turretAngle + Math.PI) * TANK_RECOIL
     const tankForwardX = Math.cos(player.angle)
@@ -84,14 +176,14 @@ function handleShoot() {
     player.vx += finalRecoilVx
     player.vy += finalRecoilVy
     player.turretRecoil = TURRET_RECOIL_MAX
-    bullets.push({
-      x: player.x + Math.cos(player.turretAngle) * (TURRET_LENGTH - player.turretRecoil),
-      y: player.y + Math.sin(player.turretAngle) * (TURRET_LENGTH - player.turretRecoil),
-      angle: player.turretAngle,
-      speed: BULLET_SPEED,
-      size: BULLET_SIZE,
-      color: 'rgb(250, 204, 21)'
-    })
+
+    const startX = player.x + Math.cos(player.turretAngle) * (TURRET_LENGTH - player.turretRecoil)
+    const startY = player.y + Math.sin(player.turretAngle) * (TURRET_LENGTH - player.turretRecoil)
+    const sprite = acquireBulletSprite()
+    sprite.position.set(startX, startY)
+    sprite.rotation = player.turretAngle
+    bulletsContainer.addChild(sprite)
+    bullets.push({ x: startX, y: startY, angle: player.turretAngle, speed: BULLET_SPEED, sprite })
   }
 }
 
@@ -157,19 +249,38 @@ function update(deltaTime: number) {
     const trackWidthOffset = TANK_WIDTH * 0.4
     const trackOffsetX = -Math.sin(player.angle) * trackWidthOffset
     const trackOffsetY = Math.cos(player.angle) * trackWidthOffset
-    const now = Date.now()
-    trackMarks.push({ x: player.x + trackOffsetX, y: player.y + trackOffsetY, angle: player.angle, spawnTime: now })
-    trackMarks.push({ x: player.x - trackOffsetX, y: player.y - trackOffsetY, angle: player.angle, spawnTime: now })
+    const left = acquireTrackSprite()
+    left.position.set(player.x + trackOffsetX, player.y + trackOffsetY)
+    left.rotation = player.angle
+    left.alpha = 0.4
+    tracksContainer.addChild(left)
+    trackMarks.push({ sprite: left, spawnTime: Date.now() })
+    const right = acquireTrackSprite()
+    right.position.set(player.x - trackOffsetX, player.y - trackOffsetY)
+    right.rotation = player.angle
+    right.alpha = 0.4
+    tracksContainer.addChild(right)
+    trackMarks.push({ sprite: right, spawnTime: Date.now() })
   }
 
   const expirationTime = Date.now() - TRACK_LIFETIME
   for (let i = trackMarks.length - 1; i >= 0; i--) {
-    if (trackMarks[i].spawnTime < expirationTime) trackMarks.splice(i, 1)
+    const mark = trackMarks[i]
+    const age = Date.now() - mark.spawnTime
+    const lifeRatio = age / TRACK_LIFETIME
+    mark.sprite.alpha = Math.max(0, 0.4 * (1 - lifeRatio))
+    if (mark.spawnTime < expirationTime) {
+      tracksContainer.removeChild(mark.sprite)
+      releaseTrackSprite(mark.sprite)
+      trackMarks.splice(i, 1)
+    }
   }
 
   const boundingSize = Math.max(TANK_LENGTH, TANK_WIDTH)
-  player.x = Math.max(boundingSize / 2, Math.min(canvas.width - boundingSize / 2, player.x))
-  player.y = Math.max(boundingSize / 2, Math.min(canvas.height - boundingSize / 2, player.y))
+  const maxX = app.renderer.width - boundingSize / 2
+  const maxY = app.renderer.height - boundingSize / 2
+  player.x = Math.max(boundingSize / 2, Math.min(maxX, player.x))
+  player.y = Math.max(boundingSize / 2, Math.min(maxY, player.y))
 
   const targetAngle = Math.atan2(mouse.y - player.y, mouse.x - player.x)
   let angleDiff = targetAngle - player.turretAngle
@@ -183,97 +294,102 @@ function update(deltaTime: number) {
   }
 
   for (let i = bullets.length - 1; i >= 0; i--) {
-    const bullet = bullets[i]
-    bullet.x += Math.cos(bullet.angle) * bullet.speed
-    bullet.y += Math.sin(bullet.angle) * bullet.speed
-    if (bullet.x < 0 || bullet.x > canvas.width || bullet.y < 0 || bullet.y > canvas.height) bullets.splice(i, 1)
+    const b = bullets[i]
+    b.x += Math.cos(b.angle) * b.speed
+    b.y += Math.sin(b.angle) * b.speed
+    if (b.x < 0 || b.x > app.renderer.width || b.y < 0 || b.y > app.renderer.height) {
+      bulletsContainer.removeChild(b.sprite)
+      releaseBulletSprite(b.sprite)
+      bullets.splice(i, 1)
+    } else {
+      b.sprite.position.set(b.x, b.y)
+    }
   }
 }
 
-function draw() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height)
-  const now = Date.now()
-  trackMarks.forEach(mark => {
-    const age = now - mark.spawnTime
-    const lifeRatio = age / TRACK_LIFETIME
-    const opacity = Math.max(0, 1 - lifeRatio)
-    ctx.fillStyle = `rgba(40, 50, 65, ${opacity * 0.4})`
-    ctx.save()
-    ctx.translate(mark.x, mark.y)
-    ctx.rotate(mark.angle)
-    ctx.beginPath()
-    ctx.moveTo(4, 0)
-    ctx.lineTo(-4, -3)
-    ctx.lineTo(-2, 0)
-    ctx.lineTo(-4, 3)
-    ctx.closePath()
-    ctx.fill()
-    ctx.restore()
-  })
-  bullets.forEach(bullet => {
-    ctx.fillStyle = bullet.color
-    ctx.beginPath()
-    ctx.arc(bullet.x, bullet.y, bullet.size, 0, Math.PI * 2)
-    ctx.fill()
-  })
-  drawTank(player)
+function syncSprites() {
+  playerContainer.position.set(player.x, player.y)
+  playerContainer.rotation = player.angle
+  // Keep turret world rotation absolute so muzzle points correctly during hull turns
+  playerTurret.rotation = player.turretAngle - player.angle
+  playerTurret.x = -player.turretRecoil
 }
 
-function drawTank(tank: typeof player) {
-  ctx.save()
-  ctx.translate(tank.x, tank.y)
-  ctx.rotate(tank.angle)
+function acquireBulletSprite(): Sprite {
+  const sprite = bulletPool.pop() ?? new Sprite(bulletTexture)
+  sprite.anchor.set(0.5)
+  sprite.visible = true
+  return sprite
+}
+function releaseBulletSprite(sprite: Sprite) {
+  sprite.visible = false
+  bulletPool.push(sprite)
+}
+
+function acquireTrackSprite(): Sprite {
+  const sprite = trackPool.pop() ?? new Sprite(trackTexture)
+  sprite.anchor.set(0.2, 0.5)
+  sprite.visible = true
+  return sprite
+}
+function releaseTrackSprite(sprite: Sprite) {
+  sprite.visible = false
+  trackPool.push(sprite)
+}
+
+function makeTankBodyTexture(): Texture {
+  const g = new Graphics()
   const tipX = TANK_LENGTH * 0.8
   const backX = -TANK_LENGTH / 2
-  const grad = ctx.createLinearGradient(backX, 0, tipX, 0)
-  grad.addColorStop(0, '#2d3748')
-  grad.addColorStop(0.8, '#a0aec0')
-  grad.addColorStop(1, '#ffffff')
-  ctx.fillStyle = grad
-  ctx.strokeStyle = 'rgba(0,0,0,0.5)'
-  ctx.lineWidth = 2
-  ctx.beginPath()
-  ctx.moveTo(tipX, 0)
-  ctx.lineTo(TANK_LENGTH / 2, -TANK_WIDTH / 2)
-  ctx.lineTo(backX, -TANK_WIDTH / 2)
-  ctx.lineTo(backX, TANK_WIDTH / 2)
-  ctx.lineTo(TANK_LENGTH / 2, TANK_WIDTH / 2)
-  ctx.closePath()
-  ctx.fill()
-  ctx.stroke()
-  ctx.rotate(-tank.angle)
-  ctx.rotate(tank.turretAngle)
-  const muzzleGrad = ctx.createLinearGradient(0, 0, TURRET_LENGTH, 0)
-  muzzleGrad.addColorStop(0, '#111827')
-  muzzleGrad.addColorStop(0.9, '#111827')
-  muzzleGrad.addColorStop(1, '#000000')
-  ctx.fillStyle = muzzleGrad
-  ctx.fillRect(0 - tank.turretRecoil, -TURRET_WIDTH / 2, TURRET_LENGTH, TURRET_WIDTH)
-  ctx.restore()
+  g.beginFill(0x738093)
+  g.lineStyle(2, 0x000000, 0.5)
+  g.moveTo(tipX, 0)
+  g.lineTo(TANK_LENGTH / 2, -TANK_WIDTH / 2)
+  g.lineTo(backX, -TANK_WIDTH / 2)
+  g.lineTo(backX, TANK_WIDTH / 2)
+  g.lineTo(TANK_LENGTH / 2, TANK_WIDTH / 2)
+  g.closePath()
+  g.endFill()
+  const texture = app.renderer.generateTexture(g)
+  g.destroy()
+  return texture
 }
 
-let lastTime = 0
-let fpsAccum = 0
-let fpsFrames = 0
-let fpsLastUpdate = 0
-function gameLoop(timestamp: number) {
-  const deltaTime = timestamp - lastTime
-  lastTime = timestamp
-  update(deltaTime)
-  draw()
-  fpsAccum += deltaTime
-  fpsFrames += 1
-  if (timestamp - fpsLastUpdate > 250) {
-    const fps = fpsAccum > 0 ? Math.round((fpsFrames * 1000) / fpsAccum) : 0
-    fpsEl.textContent = `${fps} FPS`
-    fpsAccum = 0
-    fpsFrames = 0
-    fpsLastUpdate = timestamp
-  }
-  requestAnimationFrame(gameLoop)
+function makeTurretTexture(): Texture {
+  const g = new Graphics()
+  g.beginFill(0x111827)
+  g.drawRect(0, -TURRET_WIDTH / 2, TURRET_LENGTH, TURRET_WIDTH)
+  g.endFill()
+  const texture = app.renderer.generateTexture(g)
+  g.destroy()
+  return texture
 }
 
-resizeCanvas()
-requestAnimationFrame(gameLoop)
+function makeBulletTexture(): Texture {
+  const radius = 5
+  const g = new Graphics()
+  g.beginFill(0xfacc15)
+  g.drawCircle(0, 0, radius)
+  g.endFill()
+  const texture = app.renderer.generateTexture(g)
+  g.destroy()
+  return texture
+}
+
+function makeTrackTexture(): Texture {
+  const g = new Graphics()
+  g.beginFill(0x283241)
+  g.moveTo(4, 0)
+  g.lineTo(-4, -3)
+  g.lineTo(-2, 0)
+  g.lineTo(-4, 3)
+  g.closePath()
+  g.endFill()
+  const texture = app.renderer.generateTexture(g)
+  g.destroy()
+  return texture
+}
+
+init()
 
 
