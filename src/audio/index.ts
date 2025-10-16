@@ -1,20 +1,21 @@
-const idleMap = import.meta.glob('../assets/sounds/tank/engine/idle_*.opus', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
-const runMap = import.meta.glob('../assets/sounds/tank/engine/run_*.opus', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
-const shotMap = import.meta.glob('../assets/sounds/tank/shot/*.opus', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
+import { engineIdleUrls, engineRunUrls, tankShotUrls } from '../assets/audio';
 
 let ctx: AudioContext | null = null;
 let started = false;
 
-type SfxName = 'engine_idle' | 'engine_drive' | 'shot' | 'shell' | 'reload';
+type SfxName = 'engine_idle' | 'engine_drive';
 function pickVariant(): { idle?: string; run?: string } {
-  const idleEntries = Object.entries(idleMap).map(([k, v]) => ({ idx: parseInt((k.match(/idle_(\d+)\.opus$/) || [,'-1'])[1]!, 10), url: v }));
-  const runEntries = Object.entries(runMap).map(([k, v]) => ({ idx: parseInt((k.match(/run_(\d+)\.opus$/) || [,'-1'])[1]!, 10), url: v }));
-  const idleByIdx = new Map(idleEntries.filter(e => !Number.isNaN(e.idx)).map(e => [e.idx, e.url]));
-  const runByIdx = new Map(runEntries.filter(e => !Number.isNaN(e.idx)).map(e => [e.idx, e.url]));
-  const common = [...idleByIdx.keys()].filter(i => runByIdx.has(i));
-  if (common.length === 0) return {};
-  const pick = common[Math.floor(Math.random() * common.length)];
-  return { idle: idleByIdx.get(pick), run: runByIdx.get(pick) };
+  if (engineIdleUrls.length === 0 || engineRunUrls.length === 0) return {};
+  const candidates = engineIdleUrls
+    .map(u => ({ idx: parseInt((u.match(/idle_(\d+)\.opus$/) || [,'-1'])[1]!, 10), url: u }))
+    .filter(e => !Number.isNaN(e.idx))
+    .filter(e => engineRunUrls.some(r => r.includes(`run_${e.idx}.opus`)));
+  if (candidates.length === 0) return {};
+  const pick = candidates[Math.floor(Math.random() * candidates.length)].idx;
+  return {
+    idle: `/assets/sounds/tank/engine/idle_${pick}.opus`,
+    run: `/assets/sounds/tank/engine/run_${pick}.opus`,
+  };
 }
 
 const picked = pickVariant();
@@ -29,7 +30,7 @@ let master: GainNode;
 let lastDriveVol = 0;
 let runEnv = 0;
 let idleEnv = 0;
-const shotUrls: string[] = Object.values(shotMap);
+const shotUrls: string[] = tankShotUrls;
 
 function initGraph() {
   if (ctx) return;
@@ -89,26 +90,9 @@ function update(_dt: number, speedRatio: number, isAccelerating: boolean) {
   lastDriveVol = runEnv;
 }
 
-function playOnce(name: SfxName, vol: number) {
-  if (!ctx || !started) return;
-  const el = media[name];
-  if (!el) return;
-  if (el.loop) { el.currentTime = 0; el.play().catch(()=>{}); return; }
-  const one = new Audio(el.src);
-  one.preload = 'auto';
-  const src = ctx!.createMediaElementSource(one);
-  const g = ctx!.createGain();
-  g.gain.value = vol;
-  src.connect(g).connect(master);
-  one.currentTime = 0;
-  one.play().then(()=>{
-    one.onended = ()=>{ g.disconnect(); src.disconnect(); };
-  }).catch(()=>{ g.disconnect(); src.disconnect(); });
-}
-
 function shoot() {
   if (!ctx || !started) return;
-  if (shotUrls.length === 0) { playOnce('shot', 1); return; }
+  if (shotUrls.length === 0) return;
   const url = shotUrls[Math.floor(Math.random() * shotUrls.length)];
   const one = new Audio(url);
   one.preload = 'auto';
@@ -119,10 +103,7 @@ function shoot() {
   one.currentTime = 0;
   one.play().then(()=>{ one.onended = ()=>{ g.disconnect(); src.disconnect(); }; }).catch(()=>{ g.disconnect(); src.disconnect(); });
 }
-function shellEject() { playOnce('shell', 0.7); }
-function reloadClunk() { playOnce('reload', 0.9); }
-function setShotProfile(_mode: 'inside' | 'outside') {}
 
-(window as any).audioEngine = { start, update, shoot, setShotProfile, shellEject, reloadClunk };
+(window as any).audioEngine = { start, update, shoot };
 
 
