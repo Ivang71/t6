@@ -1,5 +1,6 @@
 const idleMap = import.meta.glob('../assets/sounds/tank/engine/idle_*.opus', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
 const runMap = import.meta.glob('../assets/sounds/tank/engine/run_*.opus', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
+const shotMap = import.meta.glob('../assets/sounds/tank/shot/*.opus', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
 
 let ctx: AudioContext | null = null;
 let started = false;
@@ -25,6 +26,10 @@ const assets: Partial<Record<SfxName, string>> = {
 const media: Partial<Record<SfxName, HTMLAudioElement>> = {};
 const gains: Partial<Record<SfxName, GainNode>> = {};
 let master: GainNode;
+let lastDriveVol = 0;
+let runEnv = 0;
+let idleEnv = 0;
+const shotUrls: string[] = Object.values(shotMap);
 
 function initGraph() {
   if (ctx) return;
@@ -57,11 +62,31 @@ function start() {
 
 function update(_dt: number, speedRatio: number, isAccelerating: boolean) {
   if (!ctx || !started) return;
+  const dt = Math.min(0.1, Math.max(0, (_dt || 16) / 1000));
   const s = Math.max(0, Math.min(1, speedRatio || 0));
-  const idleVol = 0.18 * (1 - s);
-  const driveVol = 0.32 * s + (isAccelerating ? 0.08 : 0);
-  gains.engine_idle!.gain.linearRampToValueAtTime(idleVol, ctx.currentTime + 0.25);
-  gains.engine_drive!.gain.linearRampToValueAtTime(driveVol, ctx.currentTime + 0.25);
+  const atIdle = s < 0.05 && !isAccelerating;
+  let idleVol: number;
+  let driveVol: number;
+  if (atIdle) {
+    idleVol = 0.07;
+    driveVol = 0.0;
+  } else {
+    const t = Math.max(0, Math.min(1, (s - 0.05) / 0.95));
+    const smooth = t * t * (3 - 2 * t);
+    idleVol = 0.07 * (1 - smooth);
+    driveVol = (isAccelerating ? 0.16 : 0.14) * smooth;
+  }
+  const decreasing = driveVol < lastDriveVol - 1e-4;
+  // Envelope smoothing (run: slower release)
+  const runTc = decreasing ? 0.9 : 0.18;
+  const idleTc = decreasing ? 0.22 : 0.18;
+  const runCoef = 1 - Math.exp(-dt / runTc);
+  const idleCoef = 1 - Math.exp(-dt / idleTc);
+  runEnv += (driveVol - runEnv) * runCoef;
+  idleEnv += (idleVol - idleEnv) * idleCoef;
+  if (gains.engine_idle) gains.engine_idle.gain.setValueAtTime(idleEnv, ctx.currentTime);
+  if (gains.engine_drive) gains.engine_drive.gain.setValueAtTime(runEnv, ctx.currentTime);
+  lastDriveVol = runEnv;
 }
 
 function playOnce(name: SfxName, vol: number) {
@@ -81,7 +106,19 @@ function playOnce(name: SfxName, vol: number) {
   }).catch(()=>{ g.disconnect(); src.disconnect(); });
 }
 
-function shoot() { playOnce('shot', 1); }
+function shoot() {
+  if (!ctx || !started) return;
+  if (shotUrls.length === 0) { playOnce('shot', 1); return; }
+  const url = shotUrls[Math.floor(Math.random() * shotUrls.length)];
+  const one = new Audio(url);
+  one.preload = 'auto';
+  const src = ctx!.createMediaElementSource(one);
+  const g = ctx!.createGain();
+  g.gain.value = 1;
+  src.connect(g).connect(master);
+  one.currentTime = 0;
+  one.play().then(()=>{ one.onended = ()=>{ g.disconnect(); src.disconnect(); }; }).catch(()=>{ g.disconnect(); src.disconnect(); });
+}
 function shellEject() { playOnce('shell', 0.7); }
 function reloadClunk() { playOnce('reload', 0.9); }
 function setShotProfile(_mode: 'inside' | 'outside') {}
