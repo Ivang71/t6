@@ -1,5 +1,6 @@
-import { defineConfig } from 'vite';
-import path from 'node:path';
+import { defineConfig } from 'vite'
+/// <reference types="node" />
+import path from 'node:path'
 
 export default defineConfig({
   root: 'public',
@@ -17,6 +18,6 @@ export default defineConfig({
     open: true,
     fs: { allow: [path.resolve(__dirname)] },
   },
-});
+})
 
 

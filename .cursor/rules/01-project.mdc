@@ -4,7 +4,8 @@ alwaysApply: true
 
 ## Project
 
-- MVP of a browser tank MMO.
-- Use strict TypeScript (tsconfig `strict: true`).
-- Prefer no semicolons; remove semicolons where possible.
-- Paramount goals: fun gameplay first, concise code second.
+- MVP of a browser tank MMO
+- Use only yarn
+- Use strict TypeScript (tsconfig `strict: true`)
+- Prefer no semicolons; remove semicolons where possible
+- Paramount goals: fun gameplay first, concise code second
